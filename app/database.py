@@ -1,11 +1,71 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+import psycopg2
+from psycopg2 import pool
 
-# Формат URL: postgresql://user:password@localhost:5432/db_name
-DATABASE_URL = "postgresql://postgres:admin@localhost:5432/pharmacy_db"
+# Database connection parameters
+DB_HOST = "localhost"
+DB_NAME = "postgres"
+DB_USER = "myuser"
+DB_PASS = "mypassword"
 
-engine = create_engine(DATABASE_URL, echo=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Create a connection pool
+connection_pool = pool.SimpleConnectionPool(
+    1,  # minconn
+    10,  # maxconn
+    host=DB_HOST,
+    dbname=DB_NAME,
+    user=DB_USER,
+    password=DB_PASS
+)
 
-Base = declarative_base()
+def get_connection():
+    """Get a connection from the pool."""
+    return connection_pool.getconn()
+
+def release_connection(conn):
+    """Release a connection back to the pool."""
+    connection_pool.putconn(conn)
+
+def execute_query(query, params=None, fetch=True):
+    """Execute a query and return the results."""
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(query, params)
+        
+        if fetch:
+            result = cur.fetchall()
+        else:
+            conn.commit()
+            result = None
+            
+        return result
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+def execute_many(query, params_list):
+    """Execute a query with multiple parameter sets."""
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.executemany(query, params_list)
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)

@@ -1,235 +1,464 @@
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, DateTime, Interval, Text, CheckConstraint, LargeBinary, Date
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.sql.expression import text
-from .database import Base  
 from enum import Enum as PyEnum
-from sqlalchemy import Enum
+from .database import execute_query
 
+# Enums
 class MethodOfApplication(PyEnum):
     INTERNAL = "internal"
     EXTERNAL = "external"
     FOR_MIXING = "for mixing"
 
 class MedicineKind(PyEnum):
-    PILLS = 'pills',
-    MIXTURE = 'mixture', 
-    OINTMENT = 'ointment', 
-    SOLUTION = 'solution', 
-    TINCTURE = 'tincture', 
+    PILLS = 'pills'
+    MIXTURE = 'mixture'
+    OINTMENT = 'ointment'
+    SOLUTION = 'solution'
+    TINCTURE = 'tincture'
     POWDER = 'powder'
 
 class UnitsOfMeasure(PyEnum):
-    GRAMMS = 'g',
-    MILLIGRAMS = 'mg', 
-    MILLILITERS = 'ml', 
+    GRAMMS = 'g'
+    MILLIGRAMS = 'mg'
+    MILLILITERS = 'ml'
     PIECES = 'pc'
 
-
 class OrderStatus(PyEnum):
-    WAITING = 'waiting for a delivery',
-    PRODUCING = 'producing',
-    READY = 'ready',
-    ISSUEED = 'issued', 
+    WAITING = 'waiting for a delivery'
+    PRODUCING = 'producing'
+    READY = 'ready'
+    ISSUEED = 'issued'
     CANCELLED = 'cancelled'
 
 class MedicineType(PyEnum):
-    FINISHED = 'finished',
+    FINISHED = 'finished'
     MANUFACTURED = 'manufactured'
 
-class Medication(Base):
+# Base class for models
+class Model:
+    @classmethod
+    def get_by_id(cls, id):
+        query = f"SELECT * FROM {cls.__tablename__} WHERE id = %s"
+        result = execute_query(query, (id,))
+        if result:
+            return cls(*result[0])
+        return None
+
+    @classmethod
+    def get_all(cls):
+        query = f"SELECT * FROM {cls.__tablename__}"
+        results = execute_query(query)
+        return [cls(*row) for row in results]
+
+# Models
+class Medication(Model):
     __tablename__ = "medication"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(50), nullable=False)
-    manufacturer = Column(String(50), nullable=False)
-    critical_norm = Column(Numeric(10, 2), nullable=False)
-    shelf_life = Column(Interval, nullable=False)
-    unit_of_measure = Column(Enum(UnitsOfMeasure, name="units_of_measure"),
-                             nullable=False)
-    units_per_package = Column(Numeric(10, 2), 
-                               CheckConstraint('units_per_package > 0', name='medication_units_per_package_check'))
-    price = Column(Numeric(10, 2), 
-                   CheckConstraint('price > 0', name='medication_price_check'))
-    storage_conditions = Column(String(250), nullable=False), 
-    current_amount = Column(Numeric(10, 2), 
-                            CheckConstraint('current_amount >= 0', name='medication_current_amount_check'))
-    
-    deliveries = relationship("StockDelivery", back_populates="medication",
-        cascade="all, delete-orphan")
-    compositions = relationship("Composition", back_populates="medicine")
+    def __init__(self, id=None, name=None, manufacturer=None, critical_norm=None, 
+                 shelf_life=None, unit_of_measure=None, units_per_package=None, 
+                 price=None, storage_conditions=None, current_amount=None):
+        self.id = id
+        self.name = name
+        self.manufacturer = manufacturer
+        self.critical_norm = critical_norm
+        self.shelf_life = shelf_life
+        self.unit_of_measure = unit_of_measure
+        self.units_per_package = units_per_package
+        self.price = price
+        self.storage_conditions = storage_conditions
+        self.current_amount = current_amount
 
-class Ingredient(Base):
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE medication 
+                SET name = %s, manufacturer = %s, critical_norm = %s, 
+                    shelf_life = %s, unit_of_measure = %s, units_per_package = %s, 
+                    price = %s, storage_conditions = %s, current_amount = %s
+                WHERE id = %s
+            """
+            params = (self.name, self.manufacturer, self.critical_norm, 
+                      self.shelf_life, self.unit_of_measure, self.units_per_package, 
+                      self.price, self.storage_conditions, self.current_amount, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO medication 
+                (name, manufacturer, critical_norm, shelf_life, unit_of_measure, 
+                 units_per_package, price, storage_conditions, current_amount)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """
+            params = (self.name, self.manufacturer, self.critical_norm, 
+                      self.shelf_life, self.unit_of_measure, self.units_per_package, 
+                      self.price, self.storage_conditions, self.current_amount)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
+
+    def get_deliveries(self):
+        query = "SELECT * FROM medication_delivery WHERE medication_id = %s"
+        results = execute_query(query, (self.id,))
+        return [StockDelivery(*row) for row in results]
+
+class Ingredient(Medication):
     __tablename__ = "ingredient"
 
-    type = Column(String(100), nullable=False)
-    caution = Column(Text, nullable=False)
-    incompatibillity = Column(String(250))
+    def __init__(self, id=None, name=None, manufacturer=None, critical_norm=None, 
+                 shelf_life=None, unit_of_measure=None, units_per_package=None, 
+                 price=None, storage_conditions=None, current_amount=None, 
+                 type=None, caution=None, incompatibility=None):
+        super().__init__(id, name, manufacturer, critical_norm, shelf_life, 
+                         unit_of_measure, units_per_package, price, 
+                         storage_conditions, current_amount)
+        self.type = type
+        self.caution = caution
+        self.incompatibility = incompatibility
 
-    @declared_attr
-    def __table_args__(cls):
-        return {'postgresql_inherits': 'medication'}
-    
-    @declared_attr
-    def id(cls):
-        return Column(Integer, ForeignKey('medication.id'), primary_key=True)
-    
-    used_in_medicines = relationship("Composition", back_populates="ingredient")
+    def save(self):
+        super().save()
+        query = """
+            INSERT INTO ingredient (id, type, caution, incompatibility)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE 
+            SET type = %s, caution = %s, incompatibility = %s
+        """
+        params = (self.id, self.type, self.caution, self.incompatibility,
+                  self.type, self.caution, self.incompatibility)
+        execute_query(query, params, fetch=False)
+        return self
 
-class Medicine(Base):
+    def get_used_in_medicines(self):
+        query = """
+            SELECT m.* FROM medicine m
+            JOIN composition c ON m.id = c.medicine_id
+            WHERE c.ingredient_id = %s
+        """
+        results = execute_query(query, (self.id,))
+        return [Medicine(*row) for row in results]
+
+class Medicine(Medication):
     __tablename__ = "medicine"
 
-    type = Column(Enum(MedicineType, name="medicine_type"),
-                             nullable=False)
-    kind = Column(Enum(MedicineKind, name="medicine_kind"),
-                             nullable=False)
-    application = Column(Enum(MethodOfApplication, name="method_of_application"),
-                             nullable=False)
-    tech_prep_id = Column(Integer, ForeignKey('technology_of_preparation.id'), nullable=False)
+    def __init__(self, id=None, name=None, manufacturer=None, critical_norm=None, 
+                 shelf_life=None, unit_of_measure=None, units_per_package=None, 
+                 price=None, storage_conditions=None, current_amount=None, 
+                 type=None, kind=None, application=None, tech_prep_id=None):
+        super().__init__(id, name, manufacturer, critical_norm, shelf_life, 
+                         unit_of_measure, units_per_package, price, 
+                         storage_conditions, current_amount)
+        self.type = type
+        self.kind = kind
+        self.application = application
+        self.tech_prep_id = tech_prep_id
 
-    technology = relationship("Technology", back_populates="medicines")
-    prescriptions = relationship("Prescription", back_populates="medicine")
+    def save(self):
+        super().save()
+        query = """
+            INSERT INTO medicine (id, type, kind, application, tech_prep_id)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE 
+            SET type = %s, kind = %s, application = %s, tech_prep_id = %s
+        """
+        params = (self.id, self.type, self.kind, self.application, self.tech_prep_id,
+                  self.type, self.kind, self.application, self.tech_prep_id)
+        execute_query(query, params, fetch=False)
+        return self
 
-    __table_args__ = (CheckConstraint('tech_prep_id > 0', name='valid_tech_prep'))
+    def get_technology(self):
+        query = "SELECT * FROM technology_of_preparation WHERE id = %s"
+        result = execute_query(query, (self.tech_prep_id,))
+        if result:
+            return Technology(*result[0])
+        return None
 
-    @declared_attr
-    def __table_args__(cls):
-        return {'postgresql_inherits': 'medication'}
-    
-    @declared_attr
-    def id(cls):
-        return Column(Integer, ForeignKey('medication.id'), primary_key=True)
+    def get_prescriptions(self):
+        query = "SELECT * FROM prescription WHERE medicine_id = %s"
+        results = execute_query(query, (self.id,))
+        return [Prescription(*row) for row in results]
 
-class Composition(Base):
+    def get_compositions(self):
+        query = """
+            SELECT c.*, i.* FROM composition c
+            JOIN ingredient i ON c.ingredient_id = i.id
+            WHERE c.medicine_id = %s
+        """
+        results = execute_query(query, (self.id,))
+        compositions = []
+        for row in results:
+            composition = Composition(
+                medicine_id=row[0],
+                ingredient_id=row[1],
+                amount=row[2]
+            )
+            compositions.append(composition)
+        return compositions
+
+class Composition(Model):
     __tablename__ = "composition"
-    
-    medicine_id = Column(Integer, ForeignKey('medicine.id'), primary_key=True)
-    ingredient_id = Column(Integer, ForeignKey('ingredient.id'), primary_key=True)
-    amount = Column(Numeric(10, 2), nullable=False)
-    
-    medicine = relationship("Medicine", back_populates="compositions")
-    ingredient = relationship("Ingredient", back_populates="used_in_medicines")
 
-class Technology(Base):
+    def __init__(self, medicine_id=None, ingredient_id=None, amount=None):
+        self.medicine_id = medicine_id
+        self.ingredient_id = ingredient_id
+        self.amount = amount
+
+    def save(self):
+        query = """
+            INSERT INTO composition (medicine_id, ingredient_id, amount)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (medicine_id, ingredient_id) DO UPDATE 
+            SET amount = %s
+        """
+        params = (self.medicine_id, self.ingredient_id, self.amount, self.amount)
+        execute_query(query, params, fetch=False)
+        return self
+
+    def get_medicine(self):
+        return Medicine.get_by_id(self.medicine_id)
+
+    def get_ingredient(self):
+        return Ingredient.get_by_id(self.ingredient_id)
+
+class Technology(Model):
     __tablename__ = "technology_of_preparation"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=False)
+    def __init__(self, id=None, name=None, description=None, instructions=None):
+        self.id = id
+        self.name = name
+        self.description = description
+        self.instructions = instructions
 
-    medicines = relationship("Medicine", back_populates="technology")
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE technology_of_preparation 
+                SET name = %s, description = %s, instructions = %s
+                WHERE id = %s
+            """
+            params = (self.name, self.description, self.instructions, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO technology_of_preparation (name, description, instructions)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """
+            params = (self.name, self.description, self.instructions)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
 
-class Prescription(Base):
+    def get_medicines(self):
+        query = "SELECT * FROM medicine WHERE tech_prep_id = %s"
+        results = execute_query(query, (self.id,))
+        return [Medicine(*row) for row in results]
+
+class Prescription(Model):
     __tablename__ = "prescription"
 
-    id = Column(Integer, primary_key=True, index=True)
-    medicine_id = Column(Integer, ForeignKey('medicine.id'), nullable=False)
-    prescription_number = Column(Integer,
-        CheckConstraint('prescription_number > 0', name='prescription_prescription_number_check'),
-        nullable=False)
-    doctor_surname = Column(String(50), nullable=False)
-    doctor_name = Column(String(50), nullable=False)
-    doctor_patronymic = Column(String(50))
-    signature = Column(LargeBinary, nullable=False)
-    stamp = Column(LargeBinary, nullable=False)
-    age = Column(Integer,
-        CheckConstraint('age >= 0', name='prescription_age_check'),
-        nullable=False)
-    diagnosis = Column(String(100), nullable=False)
-    ammount = Column(Numeric(10, 2),
-        CheckConstraint('ammount > 0', name='prescription_ammount_check'), 
-        nullable=False)
-    application = Column(String(100), nullable=False)
+    def __init__(self, id=None, medicine_id=None, prescription_number=None, 
+                 doctor_surname=None, doctor_name=None, doctor_patronymic=None, 
+                 signature=None, stamp=None, age=None, diagnosis=None, 
+                 amount=None, application=None):
+        self.id = id
+        self.medicine_id = medicine_id
+        self.prescription_number = prescription_number
+        self.doctor_surname = doctor_surname
+        self.doctor_name = doctor_name
+        self.doctor_patronymic = doctor_patronymic
+        self.signature = signature
+        self.stamp = stamp
+        self.age = age
+        self.diagnosis = diagnosis
+        self.amount = amount
+        self.application = application
 
-    medicine = relationship("Medicine", back_populates="prescriptions")
-    
-class Order(Base):
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE prescription 
+                SET medicine_id = %s, prescription_number = %s, doctor_surname = %s,
+                    doctor_name = %s, doctor_patronymic = %s, signature = %s,
+                    stamp = %s, age = %s, diagnosis = %s, amount = %s, application = %s
+                WHERE id = %s
+            """
+            params = (self.medicine_id, self.prescription_number, self.doctor_surname,
+                      self.doctor_name, self.doctor_patronymic, self.signature,
+                      self.stamp, self.age, self.diagnosis, self.amount, 
+                      self.application, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO prescription 
+                (medicine_id, prescription_number, doctor_surname, doctor_name, 
+                 doctor_patronymic, signature, stamp, age, diagnosis, amount, application)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """
+            params = (self.medicine_id, self.prescription_number, self.doctor_surname,
+                      self.doctor_name, self.doctor_patronymic, self.signature,
+                      self.stamp, self.age, self.diagnosis, self.amount, self.application)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
+
+    def get_medicine(self):
+        return Medicine.get_by_id(self.medicine_id)
+
+    def get_orders(self):
+        query = "SELECT * FROM medicine_order WHERE prescription_id = %s"
+        results = execute_query(query, (self.id,))
+        return [Order(*row) for row in results]
+
+class Order(Model):
     __tablename__ = "medicine_order"
 
-    id = Column(Integer, primary_key=True)
-    prescription_id = Column(Integer, ForeignKey('prescription.id'), nullable=False)
-    client_id = Column(Integer, ForeignKey('client.id'), nullable=False)
-    order_number = Column(Integer,
-        CheckConstraint('order_number > 0', name='medicine_order_order_number_check'),
-        nullable=False)
-    order_date = Column(Date,
-        CheckConstraint('order_date <= CURRENT_DATE', name='medicine_order_order_date_check'),
-        nullable=False,
-        server_default=text('CURRENT_DATE')
-    )
-    status = Column(Enum(OrderStatus, name="order_status"), nullable=False)
-    date_of_issue = Column(Date,
-        CheckConstraint(
-            'date_of_issue IS NULL OR date_of_issue <= CURRENT_DATE',
-            name='medicine_order_date_of_issue_check'
-        )
-    )
-    production_time = Column(Interval,
-        CheckConstraint('production_time >= 0', name='medicine_order_production_time_check')
-    )
-    cost = Column(
-        Numeric(10, 2),
-        CheckConstraint('cost > 0', name='medicine_order_cost_check'),
-        nullable=False
-    )
+    def __init__(self, id=None, prescription_id=None, client_id=None, 
+                 order_number=None, order_date=None, status=None, 
+                 date_of_issue=None, production_time=None, cost=None):
+        self.id = id
+        self.prescription_id = prescription_id
+        self.client_id = client_id
+        self.order_number = order_number
+        self.order_date = order_date
+        self.status = status
+        self.date_of_issue = date_of_issue
+        self.production_time = production_time
+        self.cost = cost
 
-    prescription = relationship("Prescription", back_populates="orders")
-    client = relationship("Client", back_populates="orders")
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE medicine_order 
+                SET prescription_id = %s, client_id = %s, order_number = %s,
+                    order_date = %s, status = %s, date_of_issue = %s,
+                    production_time = %s, cost = %s
+                WHERE id = %s
+            """
+            params = (self.prescription_id, self.client_id, self.order_number,
+                      self.order_date, self.status, self.date_of_issue,
+                      self.production_time, self.cost, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO medicine_order 
+                (prescription_id, client_id, order_number, order_date, 
+                 status, date_of_issue, production_time, cost)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """
+            params = (self.prescription_id, self.client_id, self.order_number,
+                      self.order_date, self.status, self.date_of_issue,
+                      self.production_time, self.cost)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
 
+    def get_prescription(self):
+        return Prescription.get_by_id(self.prescription_id)
 
-class Client(Base):
+    def get_client(self):
+        return Client.get_by_id(self.client_id)
+
+class Client(Model):
     __tablename__ = "client"
 
-    id = Column(Integer, primary_key=True, index=True)
-    surname = Column(String(50), nullable=False)
-    name = Column(String(50), nullable=False)
-    patronymic = Column(String(50))
-    phone_number = Column(String(15), nullable=False)
+    def __init__(self, id=None, surname=None, name=None, patronymic=None, phone_number=None):
+        self.id = id
+        self.surname = surname
+        self.name = name
+        self.patronymic = patronymic
+        self.phone_number = phone_number
 
-    orders = relationship("Order", back_populates="client")
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE client 
+                SET surname = %s, name = %s, patronymic = %s, phone_number = %s
+                WHERE id = %s
+            """
+            params = (self.surname, self.name, self.patronymic, self.phone_number, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO client (surname, name, patronymic, phone_number)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+            """
+            params = (self.surname, self.name, self.patronymic, self.phone_number)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
 
-class StockDelivery(Base):
+    def get_orders(self):
+        query = "SELECT * FROM medicine_order WHERE client_id = %s"
+        results = execute_query(query, (self.id,))
+        return [Order(*row) for row in results]
+
+class StockDelivery(Model):
     __tablename__ = "medication_delivery"
 
-    id = Column(Integer, primary_key=True, index=True)
-    medication_id = Column(Integer, 
-        ForeignKey('medication.id', ondelete='RESTRICT'), 
-        nullable=False)
-    application_date = Column(Date,
-        CheckConstraint('application_date <= CURRENT_DATE', name='medication_delivery_application_date_check'),
-        nullable=False, server_default=text('CURRENT_DATE'))
-    delivery_date = Column(Date,
-        CheckConstraint(
-            'delivery_date IS NULL OR delivery_date <= CURRENT_DATE',
-            name='medication_delivery_delivery_date_check'
-        )
-    )
-    amount = Column(Numeric(10, 2),
-        CheckConstraint('amount > 0', name='medication_delivery_amount_check'),
-        nullable=False)
+    def __init__(self, id=None, medication_id=None, application_date=None, 
+                 delivery_date=None, amount=None):
+        self.id = id
+        self.medication_id = medication_id
+        self.application_date = application_date
+        self.delivery_date = delivery_date
+        self.amount = amount
 
-    medication = relationship("Medication", back_populates="deliveries")
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE medication_delivery 
+                SET medication_id = %s, application_date = %s, 
+                    delivery_date = %s, amount = %s
+                WHERE id = %s
+            """
+            params = (self.medication_id, self.application_date, 
+                      self.delivery_date, self.amount, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO medication_delivery 
+                (medication_id, application_date, delivery_date, amount)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+            """
+            params = (self.medication_id, self.application_date, 
+                      self.delivery_date, self.amount)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
 
+    def get_medication(self):
+        return Medication.get_by_id(self.medication_id)
 
-class Inventory(Base):
+class Inventory(Model):
     __tablename__ = "inventory"
 
-    id = Column(Integer, primary_key=True, index=True)
-    medication_id = Column(
-        Integer, 
-        ForeignKey('medication.id', ondelete='RESTRICT'), 
-        nullable=False
-    )
-    date = Column(
-        Date,
-        CheckConstraint('date <= CURRENT_DATE', name='inventory_date_check'),
-        nullable=False,
-        server_default=text('CURRENT_DATE')  # Значение по умолчанию - текущая дата
-    )
-    amount = Column(
-        Integer,
-        CheckConstraint('amount >= 0', name='inventory_amount_check'),
-        nullable=False
-    )
+    def __init__(self, id=None, medication_id=None, date=None, amount=None):
+        self.id = id
+        self.medication_id = medication_id
+        self.date = date
+        self.amount = amount
 
-    medication = relationship("Medication", back_populates="inventory_records")
+    def save(self):
+        if self.id:
+            query = """
+                UPDATE inventory 
+                SET medication_id = %s, date = %s, amount = %s
+                WHERE id = %s
+            """
+            params = (self.medication_id, self.date, self.amount, self.id)
+            execute_query(query, params, fetch=False)
+        else:
+            query = """
+                INSERT INTO inventory (medication_id, date, amount)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """
+            params = (self.medication_id, self.date, self.amount)
+            result = execute_query(query, params)
+            self.id = result[0][0]
+        return self
+
+    def get_medication(self):
+        return Medication.get_by_id(self.medication_id)
