@@ -90,7 +90,7 @@ class Medication(Model):
             params = (self.name, self.manufacturer, self.critical_norm, 
                       self.shelf_life, self.unit_of_measure, self.units_per_package, 
                       self.price, self.storage_conditions, self.current_amount)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -123,7 +123,7 @@ class Ingredient(Medication):
         """
         params = (self.id, self.type, self.caution, self.incompatibility,
                   self.type, self.caution, self.incompatibility)
-        execute_query(query, params, fetch=False)
+        execute_query(query, params, fetch=False, commit=True)
         return self
 
     def get_used_in_medicines(self):
@@ -160,7 +160,7 @@ class Medicine(Medication):
         """
         params = (self.id, self.type, self.kind, self.application, self.tech_prep_id,
                   self.type, self.kind, self.application, self.tech_prep_id)
-        execute_query(query, params, fetch=False)
+        execute_query(query, params, fetch=False, commit=True)
         return self
 
     def get_technology(self):
@@ -208,7 +208,7 @@ class Composition(Model):
             SET amount = %s
         """
         params = (self.medicine_id, self.ingredient_id, self.amount, self.amount)
-        execute_query(query, params, fetch=False)
+        execute_query(query, params, fetch=False, commit=True)
         return self
 
     def get_medicine(self):
@@ -242,7 +242,7 @@ class Technology(Model):
                 RETURNING id
             """
             params = (self.name, self.description, self.instructions)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -296,7 +296,7 @@ class Prescription(Model):
             params = (self.medicine_id, self.prescription_number, self.doctor_surname,
                       self.doctor_name, self.doctor_patronymic, self.signature,
                       self.stamp, self.age, self.diagnosis, self.amount, self.application)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -348,7 +348,7 @@ class Order(Model):
             params = (self.prescription_id, self.client_id, self.order_number,
                       self.order_date, self.status, self.date_of_issue,
                       self.production_time, self.cost)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -384,7 +384,7 @@ class Client(Model):
                 RETURNING id
             """
             params = (self.surname, self.name, self.patronymic, self.phone_number)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -424,7 +424,7 @@ class StockDelivery(Model):
             """
             params = (self.medication_id, self.application_date, 
                       self.delivery_date, self.amount)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 
@@ -456,7 +456,7 @@ class Inventory(Model):
                 RETURNING id
             """
             params = (self.medication_id, self.date, self.amount)
-            result = execute_query(query, params)
+            result = execute_query(query, params, commit=True)
             self.id = result[0][0]
         return self
 

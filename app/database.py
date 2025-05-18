@@ -25,7 +25,7 @@ def release_connection(conn):
     """Release a connection back to the pool."""
     connection_pool.putconn(conn)
 
-def execute_query(query, params=None, fetch=True):
+def execute_query(query, params=None, fetch=True, commit=None):
     """Execute a query and return the results."""
     conn = None
     cur = None
@@ -33,13 +33,19 @@ def execute_query(query, params=None, fetch=True):
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(query, params)
-        
+
+        # If commit is explicitly set, use that value
+        # Otherwise, commit only if not fetching (backward compatibility)
+        should_commit = commit if commit is not None else not fetch
+
         if fetch:
             result = cur.fetchall()
         else:
-            conn.commit()
             result = None
-            
+
+        if should_commit:
+            conn.commit()
+
         return result
     except Exception as e:
         if conn:
